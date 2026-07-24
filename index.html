@@ -388,6 +388,12 @@ async function refresh() {
     sb.from('transactions').select('*').gte('occurred_on', from).lte('occurred_on', to)
       .order('occurred_on', { ascending:false })
   ]);
+  if (res[0].error || res[1].error) {
+    console.error('load failed', res[0].error, res[1].error);
+    const e = res[0].error || res[1].error;
+    $('flagWrap').innerHTML = '<span class="flag" style="background:rgba(224,112,90,.15);' +
+      'border-color:rgba(224,112,90,.5);color:#E0705A">' + esc(e.message) + '</span>';
+  }
   state.items = res[0].data || [];
   state.tx = res[1].data || [];
   render();
@@ -552,6 +558,7 @@ function itemSheet(item) {
     '<div id="moreWrap" class="hide"><label for="f-own">Whose</label>'+
       '<input id="f-own" class="txt" value="'+esc(it.owner||'')+'" placeholder="Jared, Payton, both"></div>'+
     '<div class="more" id="moreBtn">More options</div>'+
+    '<p class="msg" id="f-err"></p>'+
     '<div class="sheet-actions"><button class="btn-cancel" id="f-cancel">Cancel</button>'+
     '<button class="btn-primary" id="f-save">Save</button></div>'+
     (item ? '<button class="btn-del" id="f-del">Delete this line</button>' : ''),
@@ -588,8 +595,11 @@ function itemSheet(item) {
         category: getCat() || 'Other',
         owner: ($('f-own') ? $('f-own').value.trim() : '') || null
       };
-      if (item) await sb.from('line_items').update(row).eq('id', item.id);
-      else await sb.from('line_items').insert(row);
+      $('f-err').textContent = 'Saving…';
+      const res = item
+        ? await sb.from('line_items').update(row).eq('id', item.id)
+        : await sb.from('line_items').insert(row);
+      if (res.error) { $('f-err').textContent = res.error.message || 'Could not save.'; return; }
       closeSheet(); refresh();
     };
     if (item) $('f-del').onclick = async () => {
@@ -615,6 +625,7 @@ function txSheet(tx) {
       '<label for="t-date">Date</label><input id="t-date" type="date" value="'+t.occurred_on+'">'+
     '</div>'+
     '<div class="more" id="tMoreBtn">Add a note or change the date</div>'+
+    '<p class="msg" id="t-err"></p>'+
     '<div class="sheet-actions"><button class="btn-cancel" id="t-cancel">Cancel</button>'+
     '<button class="btn-primary" id="t-save">Save</button></div>'+
     (tx ? '<button class="btn-del" id="t-del">Delete</button>' : ''),
@@ -633,8 +644,11 @@ function txSheet(tx) {
         occurred_on: ($('t-date') ? $('t-date').value : '') || iso(new Date()),
         entered_by: u.data.user.id
       };
-      if (tx) await sb.from('transactions').update(row).eq('id', tx.id);
-      else await sb.from('transactions').insert(row);
+      $('t-err').textContent = 'Saving…';
+      const res = tx
+        ? await sb.from('transactions').update(row).eq('id', tx.id)
+        : await sb.from('transactions').insert(row);
+      if (res.error) { $('t-err').textContent = res.error.message || 'Could not save.'; return; }
       closeSheet(); refresh();
     };
     if (tx) $('t-del').onclick = async () => {
