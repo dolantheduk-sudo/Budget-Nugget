@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1B2A20">
+<title>Ledger</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F4F7F0;
+    --bar:#DCE9DA;
+    --rule:#B4C9B3;
+    --ink:#1B2A20;
+    --ink-soft:#5A6E5C;
+    --black:#2F6B3E;
+    --red:#B3311F;
+    --white:#FFFFFF;
+    --sans:'IBM Plex Sans',system-ui,sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--paper);color:var(--ink);font-family:var(--sans);
+    font-size:16px;line-height:1.4;
+    padding-bottom:calc(72px + env(safe-area-inset-bottom));
+    -webkit-font-smoothing:antialiased;
+  }
+  button{font-family:inherit;font-size:inherit;cursor:pointer;border:none;background:none;color:inherit}
+  input,select{font-family:inherit;font-size:16px}
+  .num{font-family:var(--mono);font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+  .hide{display:none !important}
+
+  /* ---------- header ---------- */
+  header{
+    position:sticky;top:0;z-index:20;background:var(--ink);color:var(--paper);
+    padding:calc(14px + env(safe-area-inset-top)) 18px 14px;
+  }
+  .eyebrow{
+    font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+    color:#9DB5A0;font-weight:600;margin-bottom:2px;
+  }
+  .total{font-family:var(--mono);font-size:38px;font-weight:600;letter-spacing:-.02em;line-height:1.05}
+  .total.pos{color:#8FD8A4}
+  .total.neg{color:#F0907F}
+  .subtotal{font-size:12.5px;color:#9DB5A0;margin-top:5px}
+  .subtotal .num{color:var(--paper)}
+  .signout{position:absolute;top:calc(14px + env(safe-area-inset-top));right:14px;
+    font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#9DB5A0;padding:6px}
+
+  /* ---------- sections / rows ---------- */
+  main{max-width:640px;margin:0 auto}
+  .sec-head{
+    display:flex;justify-content:space-between;align-items:baseline;
+    padding:20px 18px 7px;font-size:11px;letter-spacing:.14em;
+    text-transform:uppercase;font-weight:600;color:var(--ink-soft);
+  }
+  .rows{border-top:1px solid var(--rule)}
+  .row{
+    display:flex;align-items:center;gap:12px;width:100%;text-align:left;
+    padding:13px 18px;border-bottom:1px solid var(--rule);
+  }
+  .rows .row:nth-child(odd){background:var(--bar)}
+  .row-main{flex:1;min-width:0}
+  .row-name{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .row-meta{font-size:12px;color:var(--ink-soft);margin-top:1px}
+  .row-amt{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:500;text-align:right;white-space:nowrap}
+  .row-amt small{display:block;font-size:11px;color:var(--ink-soft);font-weight:400}
+
+  .empty{padding:34px 18px;text-align:center;color:var(--ink-soft);font-size:14px}
+  .empty strong{display:block;color:var(--ink);font-weight:600;margin-bottom:4px;font-size:15px}
+
+  /* ---------- compare bars ---------- */
+  .cmp{padding:13px 18px;border-bottom:1px solid var(--rule)}
+  .rows .cmp:nth-child(odd){background:var(--bar)}
+  .cmp-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+  .cmp-name{font-weight:500}
+  .cmp-fig{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13px}
+  .track{height:7px;background:rgba(27,42,32,.13);margin-top:9px;position:relative;overflow:hidden}
+  .fill{height:100%;background:var(--black);transition:width .35s ease}
+  .fill.over{background:var(--red)}
+  .cmp-note{font-size:12px;color:var(--ink-soft);margin-top:6px}
+  .cmp-note.over{color:var(--red);font-weight:500}
+
+  /* ---------- buttons ---------- */
+  .add{
+    display:block;width:calc(100% - 36px);margin:18px;padding:15px;
+    background:var(--ink);color:var(--paper);font-weight:600;
+    letter-spacing:.03em;border-radius:2px;
+  }
+  .add.ghost{background:none;color:var(--ink);border:1.5px solid var(--ink)}
+
+  /* ---------- tab bar ---------- */
+  nav{
+    position:fixed;bottom:0;left:0;right:0;z-index:20;display:flex;
+    background:var(--white);border-top:1.5px solid var(--ink);
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  nav button{
+    flex:1;padding:13px 4px 12px;font-size:11px;font-weight:600;
+    letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft);
+    border-top:3px solid transparent;margin-top:-1.5px;
+  }
+  nav button.on{color:var(--ink);border-top-color:var(--ink)}
+
+  /* ---------- sheet / modal ---------- */
+  .scrim{position:fixed;inset:0;background:rgba(27,42,32,.5);z-index:40;display:flex;align-items:flex-end}
+  .sheet{
+    background:var(--paper);width:100%;max-width:640px;margin:0 auto;
+    padding:22px 18px calc(22px + env(safe-area-inset-bottom));
+    border-top:3px solid var(--ink);max-height:92vh;overflow-y:auto;
+    animation:up .22s cubic-bezier(.2,.8,.3,1);
+  }
+  @keyframes up{from{transform:translateY(16px);opacity:.6}to{transform:none;opacity:1}}
+  @media (prefers-reduced-motion:reduce){.sheet{animation:none}.fill{transition:none}}
+  .sheet h2{margin:0 0 16px;font-size:13px;letter-spacing:.14em;text-transform:uppercase}
+  label{display:block;font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--ink-soft);font-weight:600;margin:14px 0 5px}
+  input,select{
+    width:100%;padding:12px;background:var(--white);
+    border:1.5px solid var(--rule);border-radius:2px;color:var(--ink);
+  }
+  input:focus,select:focus{outline:2px solid var(--ink);outline-offset:-1px;border-color:var(--ink)}
+  input.big{font-family:var(--mono);font-size:30px;font-weight:600;text-align:center;padding:16px 12px}
+  .seg{display:flex;gap:0;border:1.5px solid var(--ink);border-radius:2px;overflow:hidden}
+  .seg button{flex:1;padding:11px;font-size:13px;font-weight:600}
+  .seg button.on{background:var(--ink);color:var(--paper)}
+  .sheet-actions{display:flex;gap:10px;margin-top:22px}
+  .sheet-actions button{flex:1;padding:14px;font-weight:600;border-radius:2px}
+  .btn-primary{background:var(--ink);color:var(--paper)}
+  .btn-cancel{border:1.5px solid var(--rule);color:var(--ink-soft)}
+  .btn-del{margin-top:12px;width:100%;padding:12px;color:var(--red);font-size:13px;font-weight:600}
+
+  /* ---------- auth ---------- */
+  #auth{max-width:380px;margin:0 auto;padding:16vh 22px 22px}
+  .brand{font-family:var(--mono);font-size:30px;font-weight:600;letter-spacing:-.02em}
+  .brand-sub{color:var(--ink-soft);font-size:14px;margin:4px 0 26px}
+  .msg{margin-top:14px;font-size:13.5px;color:var(--red);min-height:19px}
+  .msg.ok{color:var(--black)}
+  .loading{padding:60px 18px;text-align:center;color:var(--ink-soft);font-size:14px}
+</style>
+</head>
+<body>
+
+<!-- ============ AUTH ============ -->
+<section id="auth" class="hide">
+  <div class="brand">Ledger</div>
+  <p class="brand-sub">Shared household budget.</p>
+  <label for="email">Email</label>
+  <input id="email" type="email" autocomplete="email" inputmode="email">
+  <label for="pw">Password</label>
+  <input id="pw" type="password" autocomplete="current-password">
+  <div class="sheet-actions">
+    <button class="btn-primary" id="signin">Sign in</button>
+  </div>
+  <p class="msg" id="authmsg"></p>
+</section>
+
+<div id="boot" class="loading">Loading…</div>
+
+<!-- ============ APP ============ -->
+<div id="app" class="hide">
+  <header>
+    <button class="signout" id="signout">Sign out</button>
+    <div class="eyebrow" id="totalLabel">Left over each month</div>
+    <div class="total num" id="totalNum">$0</div>
+    <div class="subtotal" id="totalSub"></div>
+  </header>
+
+  <main>
+    <!-- PLAN -->
+    <section id="v-plan">
+      <div class="sec-head"><span>Money in</span><span id="inSum" class="num"></span></div>
+      <div class="rows" id="incomeRows"></div>
+      <div class="sec-head"><span>Money out</span><span id="outSum" class="num"></span></div>
+      <div class="rows" id="expenseRows"></div>
+      <button class="add" id="addItem">Add a line</button>
+    </section>
+
+    <!-- LOG -->
+    <section id="v-log" class="hide">
+      <div class="sec-head"><span id="logMonth">This month</span><span id="logSum" class="num"></span></div>
+      <div class="rows" id="txRows"></div>
+      <button class="add" id="addTx">Log spending</button>
+    </section>
+
+    <!-- COMPARE -->
+    <section id="v-cmp" class="hide">
+      <div class="sec-head"><span id="cmpMonth">Planned vs actual</span></div>
+      <div class="rows" id="cmpRows"></div>
+      <div style="height:24px"></div>
+    </section>
+  </main>
+
+  <nav>
+    <button data-view="plan" class="on">Plan</button>
+    <button data-view="log">Log</button>
+    <button data-view="cmp">Compare</button>
+  </nav>
+</div>
+
+<div id="modal"></div>
+
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+/* ================= CONFIG ================= */
+const SUPABASE_URL = 'https://peedvnomlyzetjhlkutg.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_d_OCgi1u_WK7JN6L93eT9w_tlZ3sE4B';
+const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+/* ================= STATE ================= */
+const PER_MONTH = { weekly:52/12, biweekly:26/12, monthly:1, quarterly:1/3, annual:1/12 };
+const CADENCES  = ['weekly','biweekly','monthly','quarterly','annual'];
+const state = { household:null, items:[], tx:[], view:'plan' };
+
+const $ = id => document.getElementById(id);
+const money = n => (n<0?'-':'') + '$' + Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+const money2 = n => '$' + Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const toMonthly = it => Number(it.amount) * PER_MONTH[it.cadence];
+const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const monthStart = () => { const d=new Date(); return new Date(d.getFullYear(),d.getMonth(),1).toISOString().slice(0,10); };
+const monthName = () => new Date().toLocaleDateString('en-US',{month:'long'});
+
+/* ================= AUTH ================= */
+$('signin').onclick = async () => {
+  const email = $('email').value.trim(), password = $('pw').value;
+  const msg = $('authmsg');
+  if (!email || !password) { msg.textContent = 'Enter your email and password.'; return; }
+  msg.className = 'msg'; msg.textContent = 'Signing in…';
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) msg.textContent = error.message;
+};
+$('pw').addEventListener('keydown', e => { if (e.key === 'Enter') $('signin').click(); });
+$('signout').onclick = () => sb.auth.signOut();
+
+sb.auth.onAuthStateChange((_e, session) => {
+  $('boot').classList.add('hide');
+  if (session) { $('auth').classList.add('hide'); $('app').classList.remove('hide'); start(); }
+  else { $('app').classList.add('hide'); $('auth').classList.remove('hide'); }
+});
+
+/* ================= LOAD ================= */
+async function start() {
+  const { data: mem } = await sb.from('household_members').select('household_id').limit(1);
+  if (!mem || !mem.length) {
+    $('app').innerHTML = '<div class="empty" style="padding-top:60px"><strong>No household yet</strong>' +
+      'Your login works, but this account isn\'t linked to a household. Run the setup SQL in Supabase, then reopen.</div>';
+    return;
+  }
+  state.household = mem[0].household_id;
+  await refresh();
+
+  sb.channel('live')
+    .on('postgres_changes', { event:'*', schema:'public', table:'line_items' }, refresh)
+    .on('postgres_changes', { event:'*', schema:'public', table:'transactions' }, refresh)
+    .subscribe();
+}
+
+async function refresh() {
+  const [items, tx] = await Promise.all([
+    sb.from('line_items').select('*').eq('is_active', true).order('created_at'),
+    sb.from('transactions').select('*').gte('occurred_on', monthStart()).order('occurred_on', { ascending:false })
+  ]);
+  state.items = items.data || [];
+  state.tx = tx.data || [];
+  render();
+}
+
+/* ================= RENDER ================= */
+function render() {
+  const income  = state.items.filter(i => i.type === 'income');
+  const expense = state.items.filter(i => i.type === 'expense');
+  const inSum  = income.reduce((s,i) => s + toMonthly(i), 0);
+  const outSum = expense.reduce((s,i) => s + toMonthly(i), 0);
+  const left = inSum - outSum;
+
+  $('totalNum').textContent = money(left);
+  $('totalNum').className = 'total num ' + (left < 0 ? 'neg' : 'pos');
+  $('totalLabel').textContent = left < 0 ? 'Short each month' : 'Left over each month';
+  $('totalSub').innerHTML = `<span class="num">${money(inSum)}</span> in · <span class="num">${money(outSum)}</span> out`;
+  $('inSum').textContent = money(inSum);
+  $('outSum').textContent = money(outSum);
+
+  renderItems('incomeRows', income, 'Nothing coming in yet', 'Add a paycheck or other income.');
+  renderItems('expenseRows', expense, 'Nothing going out yet', 'Add rent, groceries, subscriptions.');
+
+  // LOG
+  const spent = state.tx.reduce((s,t) => s + Number(t.amount), 0);
+  $('logMonth').textContent = monthName();
+  $('logSum').textContent = money2(spent);
+  $('txRows').innerHTML = state.tx.length ? state.tx.map(t => `
+    <button class="row" data-tx="${t.id}">
+      <div class="row-main">
+        <div class="row-name">${esc(t.description || t.category)}</div>
+        <div class="row-meta">${esc(t.category)} · ${new Date(t.occurred_on+'T12:00').toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div>
+      </div>
+      <div class="row-amt">${money2(Number(t.amount))}</div>
+    </button>`).join('')
+    : `<div class="empty"><strong>No spending logged this month</strong>Tap below the first time you buy something.</div>`;
+
+  // COMPARE
+  $('cmpMonth').textContent = `${monthName()} · planned vs actual`;
+  const cats = {};
+  expense.forEach(i => { cats[i.category] = cats[i.category] || { planned:0, actual:0 }; cats[i.category].planned += toMonthly(i); });
+  state.tx.forEach(t => { cats[t.category] = cats[t.category] || { planned:0, actual:0 }; cats[t.category].actual += Number(t.amount); });
+  const keys = Object.keys(cats).sort((a,b) => cats[b].actual - cats[a].actual);
+
+  $('cmpRows').innerHTML = keys.length ? keys.map(k => {
+    const { planned, actual } = cats[k];
+    const pct = planned > 0 ? Math.min(100, actual/planned*100) : (actual > 0 ? 100 : 0);
+    const over = planned > 0 && actual > planned;
+    const diff = planned - actual;
+    let note;
+    if (planned === 0) note = 'Not in the plan';
+    else if (over)     note = `${money2(-diff)} over`;
+    else               note = `${money2(diff)} left`;
+    return `<div class="cmp">
+      <div class="cmp-top">
+        <span class="cmp-name">${esc(k)}</span>
+        <span class="cmp-fig">${money2(actual)} / ${money2(planned)}</span>
+      </div>
+      <div class="track"><div class="fill${over?' over':''}" style="width:${pct}%"></div></div>
+      <div class="cmp-note${over?' over':''}">${note}</div>
+    </div>`;
+  }).join('')
+    : `<div class="empty"><strong>Nothing to compare yet</strong>Add some expenses to your plan, then log a purchase.</div>`;
+}
+
+function renderItems(target, list, emptyTitle, emptyBody) {
+  $(target).innerHTML = list.length ? list.map(i => `
+    <button class="row" data-item="${i.id}">
+      <div class="row-main">
+        <div class="row-name">${esc(i.name)}</div>
+        <div class="row-meta">${esc(i.category)}${i.owner ? ' · ' + esc(i.owner) : ''}</div>
+      </div>
+      <div class="row-amt">${money2(Number(i.amount))}
+        <small>${i.cadence === 'monthly' ? 'monthly' : i.cadence + ' · ' + money(toMonthly(i)) + '/mo'}</small>
+      </div>
+    </button>`).join('')
+    : `<div class="empty"><strong>${emptyTitle}</strong>${emptyBody}</div>`;
+}
+
+/* ================= NAV ================= */
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  state.view = b.dataset.view;
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b));
+  ['plan','log','cmp'].forEach(v => $('v-'+v).classList.toggle('hide', v !== state.view));
+  window.scrollTo(0,0);
+});
+
+/* ================= SHEETS ================= */
+const closeSheet = () => { $('modal').innerHTML = ''; };
+function openSheet(html, wire) {
+  $('modal').innerHTML = `<div class="scrim"><div class="sheet">${html}</div></div>`;
+  $('modal').querySelector('.scrim').addEventListener('click', e => { if (e.target.classList.contains('scrim')) closeSheet(); });
+  wire();
+}
+
+function categoryList() {
+  return [...new Set([...state.items.map(i => i.category), ...state.tx.map(t => t.category),
+    'Housing','Groceries','Transportation','Utilities','Dining out','Fun','Health','Savings'])];
+}
+const datalist = () => `<datalist id="cats">${categoryList().map(c => `<option value="${esc(c)}">`).join('')}</datalist>`;
+
+/* ---- line item ---- */
+function itemSheet(item) {
+  const it = item || { name:'', amount:'', type:'expense', cadence:'monthly', category:'', owner:'' };
+  openSheet(`
+    <h2>${item ? 'Edit line' : 'New line'}</h2>
+    <div class="seg" id="typeSeg">
+      <button data-type="expense" class="${it.type==='expense'?'on':''}">Money out</button>
+      <button data-type="income" class="${it.type==='income'?'on':''}">Money in</button>
+    </div>
+    <label for="f-amt">Amount</label>
+    <input id="f-amt" class="big num" type="number" inputmode="decimal" step="0.01" value="${it.amount}" placeholder="0.00">
+    <label for="f-name">What is it</label>
+    <input id="f-name" value="${esc(it.name)}" placeholder="Rent, paycheck, Netflix…">
+    <label for="f-cad">How often</label>
+    <select id="f-cad">${CADENCES.map(c => `<option value="${c}"${c===it.cadence?' selected':''}>${c}</option>`).join('')}</select>
+    <label for="f-cat">Category</label>
+    <input id="f-cat" list="cats" value="${esc(it.category)}" placeholder="Housing">${datalist()}
+    <label for="f-own">Whose (optional)</label>
+    <input id="f-own" value="${esc(it.owner||'')}" placeholder="Jared, Payton, both">
+    <div class="sheet-actions">
+      <button class="btn-cancel" id="f-cancel">Cancel</button>
+      <button class="btn-primary" id="f-save">Save</button>
+    </div>
+    ${item ? '<button class="btn-del" id="f-del">Delete this line</button>' : ''}
+  `, () => {
+    let type = it.type;
+    $('typeSeg').querySelectorAll('button').forEach(b => b.onclick = () => {
+      type = b.dataset.type;
+      $('typeSeg').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+    });
+    $('f-cancel').onclick = closeSheet;
+    $('f-save').onclick = async () => {
+      const row = {
+        household_id: state.household,
+        name: $('f-name').value.trim() || 'Untitled',
+        amount: Number($('f-amt').value) || 0,
+        type, cadence: $('f-cad').value,
+        category: $('f-cat').value.trim() || 'Other',
+        owner: $('f-own').value.trim() || null
+      };
+      if (item) await sb.from('line_items').update(row).eq('id', item.id);
+      else await sb.from('line_items').insert(row);
+      closeSheet(); refresh();
+    };
+    if (item) $('f-del').onclick = async () => {
+      await sb.from('line_items').update({ is_active:false }).eq('id', item.id);
+      closeSheet(); refresh();
+    };
+    if (!item) setTimeout(() => $('f-amt').focus(), 60);
+  });
+}
+
+/* ---- transaction ---- */
+function txSheet(tx) {
+  const t = tx || { amount:'', description:'', category:'', occurred_on:new Date().toISOString().slice(0,10) };
+  openSheet(`
+    <h2>${tx ? 'Edit spending' : 'Log spending'}</h2>
+    <label for="t-amt">Amount</label>
+    <input id="t-amt" class="big num" type="number" inputmode="decimal" step="0.01" value="${t.amount}" placeholder="0.00">
+    <label for="t-cat">Category</label>
+    <input id="t-cat" list="cats" value="${esc(t.category)}" placeholder="Groceries">${datalist()}
+    <label for="t-desc">Note (optional)</label>
+    <input id="t-desc" value="${esc(t.description||'')}" placeholder="Wegmans">
+    <label for="t-date">Date</label>
+    <input id="t-date" type="date" value="${t.occurred_on}">
+    <div class="sheet-actions">
+      <button class="btn-cancel" id="t-cancel">Cancel</button>
+      <button class="btn-primary" id="t-save">Save</button>
+    </div>
+    ${tx ? '<button class="btn-del" id="t-del">Delete</button>' : ''}
+  `, () => {
+    $('t-cancel').onclick = closeSheet;
+    $('t-save').onclick = async () => {
+      const { data:{ user } } = await sb.auth.getUser();
+      const row = {
+        household_id: state.household,
+        amount: Number($('t-amt').value) || 0,
+        category: $('t-cat').value.trim() || 'Other',
+        description: $('t-desc').value.trim() || null,
+        occurred_on: $('t-date').value,
+        entered_by: user.id
+      };
+      if (tx) await sb.from('transactions').update(row).eq('id', tx.id);
+      else await sb.from('transactions').insert(row);
+      closeSheet(); refresh();
+    };
+    if (tx) $('t-del').onclick = async () => {
+      await sb.from('transactions').delete().eq('id', tx.id);
+      closeSheet(); refresh();
+    };
+    if (!tx) setTimeout(() => $('t-amt').focus(), 60);
+  });
+}
+
+$('addItem').onclick = () => itemSheet(null);
+$('addTx').onclick  = () => txSheet(null);
+document.addEventListener('click', e => {
+  const i = e.target.closest('[data-item]');
+  if (i) return itemSheet(state.items.find(x => x.id === i.dataset.item));
+  const t = e.target.closest('[data-tx]');
+  if (t) return txSheet(state.tx.find(x => x.id === t.dataset.tx));
+});
+
+/* ================= PWA ================= */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(()=>{}));
+}
+</script>
+</body>
+</html>
