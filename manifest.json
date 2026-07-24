@@ -1,16 +1,17 @@
 {
-  "name": "Ledger — Shared Budget",
-  "short_name": "Ledger",
+  "name": "Budget Nugget",
+  "short_name": "Nugget",
   "description": "Plan the month together, then see how it actually went.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#F4F7F0",
-  "theme_color": "#1B2A20",
+  "background_color": "#14110E",
+  "theme_color": "#14110E",
+  "categories": ["finance", "productivity"],
   "icons": [
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }
