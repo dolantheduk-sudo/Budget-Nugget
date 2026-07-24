@@ -189,6 +189,20 @@
   #auth label{text-align:left}
   .msg{margin-top:15px;font-size:13px;color:var(--red);min-height:19px}
   .loading{padding:70px 20px;text-align:center;color:var(--muted);font-size:13.5px}
+
+  /* ---------- onboarding ---------- */
+  #onboard{max-width:400px;margin:0 auto;padding:11vh 26px 26px;text-align:center}
+  #onboard .nug{margin:0 auto 20px}
+  #onboard label{text-align:left}
+  .ob-big{display:block;width:100%;padding:16px;border-radius:12px;font-weight:700;margin-bottom:11px}
+  .ob-big.btn-cancel{flex:none !important}
+  input.code{text-align:center;font-size:26px;font-weight:700;letter-spacing:.28em;
+    text-transform:uppercase;padding:16px 10px}
+  .codebox{background:var(--surface2);border:1px dashed var(--gold);border-radius:12px;
+    padding:20px;font-size:30px;font-weight:700;letter-spacing:.3em;color:var(--gold);
+    text-align:center;text-indent:.3em}
+  .invitefoot{padding:0 20px 34px;text-align:center;color:var(--muted);font-size:12px}
+  .invitefoot b{color:var(--gold);letter-spacing:.22em;font-weight:700;margin-left:5px}
 </style>
 </head>
 <body>
@@ -214,6 +228,52 @@
 </section>
 
 <div id="boot" class="loading">Loading…</div>
+
+<section id="onboard" class="hide">
+  <svg class="nug" width="72" height="72" viewBox="0 0 64 64" aria-hidden="true">
+    <defs><linearGradient id="gc" x1="0" y1="0" x2=".35" y2="1">
+      <stop offset="0" stop-color="#FAE7AA"/><stop offset=".55" stop-color="#E8B44A"/><stop offset="1" stop-color="#96681E"/>
+    </linearGradient></defs>
+    <polygon fill="url(#gc)" points="32.0,8.7 43.6,14.8 56.8,19.9 56.3,32.5 55.9,44.6 43.1,49.4 32.0,55.8 17.4,54.7 11.4,43.0 3.9,32.5 12.4,22.5 19.0,12.7"/>
+    <polygon fill="#FFF6DC" opacity=".34" points="32.0,8.7 19.0,12.7 12.4,22.5 32,32.5"/>
+  </svg>
+  <div class="brand">One more thing</div>
+  <p class="brand-sub">A household is the shared pot you both budget from.</p>
+
+  <div id="ob-choose">
+    <button class="btn-primary ob-big" id="ob-showCreate">Start a new household</button>
+    <button class="btn-cancel ob-big" id="ob-showJoin">I have an invite code</button>
+  </div>
+
+  <div id="ob-create" class="hide">
+    <label for="ob-name">Call it something</label>
+    <input id="ob-name" class="txt" value="Home" placeholder="Home">
+    <div class="sheet-actions">
+      <button class="btn-cancel" id="ob-back1">Back</button>
+      <button class="btn-primary" id="ob-create-go">Create</button>
+    </div>
+  </div>
+
+  <div id="ob-join" class="hide">
+    <label for="ob-code">Invite code</label>
+    <input id="ob-code" class="txt code" maxlength="6" autocapitalize="characters"
+           autocomplete="off" placeholder="ABC123">
+    <div class="sheet-actions">
+      <button class="btn-cancel" id="ob-back2">Back</button>
+      <button class="btn-primary" id="ob-join-go">Join</button>
+    </div>
+  </div>
+
+  <div id="ob-done" class="hide">
+    <label>Your invite code</label>
+    <div class="codebox" id="ob-madecode">------</div>
+    <p class="hint" style="text-align:center">Send this to whoever is budgeting with you.</p>
+    <div class="sheet-actions"><button class="btn-primary" id="ob-finish">Done</button></div>
+  </div>
+
+  <p class="msg" id="ob-err"></p>
+  <button class="signout" id="ob-signout" style="margin-top:14px;padding:10px">Sign out</button>
+</section>
 
 <div id="app" class="hide">
   <header>
@@ -254,6 +314,7 @@
         <div class="bars" id="bars"></div>
         <div class="blabels" id="blabels"></div>
       </div>
+      <div class="invitefoot" id="inviteFoot"></div>
     </section>
 
     <section id="v-log" class="hide">
@@ -360,25 +421,70 @@ $('pw').addEventListener('keydown', e => { if (e.key === 'Enter') $('signin').cl
 $('signout').onclick = () => sb.auth.signOut();
 sb.auth.onAuthStateChange((_e, s) => {
   $('boot').classList.add('hide');
-  if (s) { $('auth').classList.add('hide'); $('app').classList.remove('hide'); start(); }
-  else { $('app').classList.add('hide'); $('auth').classList.remove('hide'); }
+  if (s) { $('auth').classList.add('hide'); start(); }
+  else {
+    $('app').classList.add('hide');
+    $('onboard').classList.add('hide');
+    $('auth').classList.remove('hide');
+  }
 });
 
 /* ===== load ===== */
 async function start() {
   const r = await sb.from('household_members').select('household_id').limit(1);
   const mem = r.data;
-  if (!mem || !mem.length) {
-    $('app').innerHTML = '<div class="empty" style="padding-top:70px"><strong>No household yet</strong>' +
-      'This account is not linked to a household. Run the setup SQL, then reopen.</div>';
-    return;
-  }
+  if (!mem || !mem.length) { showOnboarding(); return; }
+  $('onboard').classList.add('hide');
+  $('app').classList.remove('hide');
   state.household = mem[0].household_id;
   await refresh();
+  loadInviteCode();
   sb.channel('live')
     .on('postgres_changes', { event:'*', schema:'public', table:'line_items' }, refresh)
     .on('postgres_changes', { event:'*', schema:'public', table:'transactions' }, refresh)
     .subscribe();
+}
+
+/* ===== onboarding ===== */
+const obPanels = ['ob-choose','ob-create','ob-join','ob-done'];
+const obShow = id => obPanels.forEach(p => $(p).classList.toggle('hide', p !== id));
+
+function showOnboarding() {
+  $('app').classList.add('hide');
+  $('onboard').classList.remove('hide');
+  $('ob-err').textContent = '';
+  obShow('ob-choose');
+}
+
+$('ob-showCreate').onclick = () => { obShow('ob-create'); $('ob-name').focus(); };
+$('ob-showJoin').onclick   = () => { obShow('ob-join'); $('ob-code').focus(); };
+$('ob-back1').onclick = () => { $('ob-err').textContent=''; obShow('ob-choose'); };
+$('ob-back2').onclick = () => { $('ob-err').textContent=''; obShow('ob-choose'); };
+$('ob-signout').onclick = () => sb.auth.signOut();
+
+$('ob-create-go').onclick = async () => {
+  $('ob-err').textContent = 'Creating…';
+  const r = await sb.rpc('create_household', { p_name: $('ob-name').value });
+  if (r.error) { $('ob-err').textContent = r.error.message; return; }
+  $('ob-err').textContent = '';
+  $('ob-madecode').textContent = r.data;
+  obShow('ob-done');
+};
+$('ob-join-go').onclick = async () => {
+  const code = $('ob-code').value.trim();
+  if (code.length < 4) { $('ob-err').textContent = 'Enter the six-character code.'; return; }
+  $('ob-err').textContent = 'Joining…';
+  const r = await sb.rpc('join_household', { p_code: code });
+  if (r.error) { $('ob-err').textContent = r.error.message; return; }
+  $('ob-err').textContent = '';
+  start();
+};
+$('ob-finish').onclick = () => start();
+
+async function loadInviteCode() {
+  const r = await sb.rpc('my_invite_code');
+  const el = $('inviteFoot');
+  if (el) el.innerHTML = r.data ? 'Invite code<b>' + esc(r.data) + '</b>' : '';
 }
 
 async function refresh() {
