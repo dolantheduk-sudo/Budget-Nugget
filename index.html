@@ -102,6 +102,20 @@
     font-family:var(--display)}
 
   .outlook{padding:6px 20px 28px}
+  .ranges{display:flex;gap:5px}
+  .ranges button{padding:4px 10px;border-radius:100px;background:var(--surface2);
+    border:1px solid var(--line);color:var(--muted);font-size:10.5px;font-weight:700;letter-spacing:.06em}
+  .ranges button.on{background:var(--gold);border-color:var(--gold);color:#3A2609}
+  .balsvg{display:block;width:100%;height:170px;overflow:visible}
+  .chartfoot{display:flex;justify-content:space-between;gap:12px;margin-top:12px;
+    font-size:11.5px;color:var(--muted)}
+  .chartfoot b{display:block;color:var(--cream);font-weight:600;font-size:14px;
+    font-variant-numeric:tabular-nums;margin-top:2px}
+  .chartfoot b.bad{color:var(--red)}
+  .chartfoot>div:last-child{text-align:right}
+  .proj{font-size:12.5px;color:var(--muted);margin-top:7px}
+  .proj b{color:var(--gold);font-weight:600;font-variant-numeric:tabular-nums}
+  .proj b.bad{color:var(--red)}
   .bars{display:flex;align-items:flex-end;gap:7px;height:104px}
   .bwrap{flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%}
   .b{width:100%;min-height:3px;border-radius:3px 3px 0 0;
@@ -294,6 +308,7 @@
         </svg>
         <b>Budget Nugget</b>
       </div>
+      <button class="signout" id="settingsBtn" style="letter-spacing:.12em">Settings</button>
       <button class="signout" id="signout">Sign out</button>
     </div>
     <div class="whobar hide" id="whobar"></div>
@@ -305,6 +320,7 @@
     <div class="eyebrow" id="totalLabel">Left over</div>
     <div class="total num" id="totalNum">$0</div>
     <div class="subtotal" id="totalSub"></div>
+    <div id="projWrap"></div>
     <div id="flagWrap"></div>
     <div class="hpad"></div>
   </header>
@@ -320,10 +336,11 @@
       <div class="sec-head" id="putHead"><span>Putting away</span><span id="goalSum" class="num"></span></div>
       <div class="rows" id="goalContribRows"></div>
       <button class="add" id="addItem">Add a line</button>
-      <div class="sec-head"><span>Next six months</span></div>
+      <div class="sec-head"><span>Where this leaves you</span>
+        <span class="ranges" id="ranges"></span></div>
       <div class="outlook">
-        <div class="bars" id="bars"></div>
-        <div class="blabels" id="blabels"></div>
+        <div id="balChart"></div>
+        <div class="chartfoot" id="chartFoot"></div>
       </div>
       <div class="invitefoot" id="inviteFoot"></div>
     </section>
@@ -379,8 +396,8 @@ const NUGS=[[20.2,141.7,6.6,26.1],[35.7,142.5,5.3,182.7],[48,142.8,5.4,32.7],[64
 [58.3,40.6,7.3,142.5],[73.1,41.1,6.8,61.2],[86.4,38.2,7.2,290.3]];
 
 const now = new Date();
-const state = { household:null, me:null, members:[], items:[], tx:[], goals:[], goalTx:[],
-                view:'plan', who:'all', y:now.getFullYear(), m:now.getMonth() };
+const state = { household:null, home:null, me:null, members:[], items:[], tx:[], goals:[], goalTx:[],
+                view:'plan', who:'all', range:12, y:now.getFullYear(), m:now.getMonth() };
 
 const $ = id => document.getElementById(id);
 const money  = n => (n<0?'-':'')+'$'+Math.abs(Math.round(n)).toLocaleString('en-US');
@@ -430,20 +447,58 @@ function occurredSoFar(item, y, m) {
   const t = today();
   return d.filter(x => x <= t).length;
 }
-function occurrencesToDate(item) {
-  const start = item.anchor_date ? pd(item.anchor_date)
-              : (item.created_at ? pd(item.created_at) : today());
-  const t = today();
-  if (start > t) return 0;
-  let n = 0, y = start.getFullYear(), m = start.getMonth(), guard = 0;
-  const ey = t.getFullYear(), em = t.getMonth();
-  while ((y < ey || (y === ey && m <= em)) && guard++ < 900) {
-    const ds = occDates(item, y, m);
-    if (ds === null) n += AVG[item.cadence];
-    else n += ds.filter(d => d >= start && d <= t).length;
-    m++; if (m > 11) { m = 0; y++; }
+
+/* ===== versions: which edition of a line was true in a given month ===== */
+function activeIn(it, y, m) {
+  const f = pd(it.effective_from || '2000-01-01');
+  if (y < f.getFullYear() || (y === f.getFullYear() && m < f.getMonth())) return false;
+  if (it.effective_to) {
+    const t = pd(it.effective_to);
+    if (y > t.getFullYear() || (y === t.getFullYear() && m > t.getMonth())) return false;
   }
-  return n;
+  return true;
+}
+const itemsFor = (y,m) => state.items.filter(i => activeIn(i,y,m));
+const isCurrent = it => !it.effective_to;
+
+/* ===== running balance: what the plan leaves in the account ===== */
+function opening() {
+  const h = state.home || {};
+  const d = h.opening_date ? pd(h.opening_date) : new Date(now.getFullYear(), now.getMonth(), 1);
+  return { amount: Number(h.opening_balance) || 0, y: d.getFullYear(), m: d.getMonth() };
+}
+/* balance at the end of a month, counting forward from the opening reading */
+function balanceEnd(y, m) {
+  const o = opening();
+  if (y < o.y || (y === o.y && m < o.m)) return null;   // before we had a reading
+  let bal = o.amount, cy = o.y, cm = o.m, guard = 0;
+  while ((cy < y || (cy === y && cm <= m)) && guard++ < 600) {
+    bal += totals(cy, cm).left;
+    cm++; if (cm > 11) { cm = 0; cy++; }
+  }
+  return bal;
+}
+/* the next `n` months of running balance, starting from the viewed month */
+function balanceSeries(n) {
+  const o = opening();
+  const startY = state.y, startM = state.m;
+  let bal, cy, cm;
+  if (startY < o.y || (startY === o.y && startM < o.m)) { bal = o.amount; cy = startY; cm = startM; }
+  else {
+    bal = o.amount; cy = o.y; cm = o.m;
+    while (cy < startY || (cy === startY && cm < startM)) {
+      bal += totals(cy, cm).left;
+      cm++; if (cm > 11) { cm = 0; cy++; }
+    }
+  }
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    const t = totals(cy, cm);
+    bal += t.left;
+    out.push({ y:cy, m:cm, left:t.left, bal:bal, fat:extraPaychecks(cy, cm) });
+    cm++; if (cm > 11) { cm = 0; cy++; }
+  }
+  return out;
 }
 
 /* ===== whose money is this? ===== */
@@ -465,7 +520,7 @@ const amountIn = (i,y,m) => Number(i.amount) * occurrences(i,y,m) * share(i);
 
 function totals(y, m) {
   let inc = 0, bill = 0, env = 0, goal = 0;
-  for (const it of state.items) {
+  for (const it of itemsFor(y, m)) {
     const v = amountIn(it, y, m);
     if (it.type === 'income') inc += v;
     else if (it.goal_id) goal += v;
@@ -475,19 +530,43 @@ function totals(y, m) {
   return { inc:inc, bill:bill, env:env, goal:goal, out:bill+env+goal, left:inc-bill-env-goal };
 }
 function extraPaychecks(y, m) {
-  return state.items.some(i => i.type === 'income' && i.anchor_date && share(i) > 0 &&
+  return itemsFor(y,m).some(i => i.type === 'income' && i.anchor_date && share(i) > 0 &&
     (i.cadence === 'biweekly' || i.cadence === 'weekly') &&
     occurrences(i, y, m) > (i.cadence === 'biweekly' ? 2 : 4));
 }
+/* walk month by month, using whichever version was true each month */
 function goalSaved(g) {
+  const t = today();
+  const series = {};
+  state.items.filter(i => i.goal_id === g.id).forEach(i => {
+    const k = i.series_id || i.id;
+    if (!series[k]) series[k] = [];
+    series[k].push(i);
+  });
   let acc = 0;
-  state.items.filter(i => i.goal_id === g.id)
-    .forEach(i => { acc += Number(i.amount) * occurrencesToDate(i) * share(i); });
-  state.goalTx.filter(t => t.goal_id === g.id)
-    .forEach(t => { acc -= Number(t.amount) * txShare(t); });
+  Object.keys(series).forEach(k => {
+    const vers = series[k];
+    const starts = vers.map(v => v.anchor_date ? pd(v.anchor_date)
+                                : (v.created_at ? pd(v.created_at) : t));
+    let start = starts.sort((a,b) => a-b)[0];
+    if (start > t) return;
+    let y = start.getFullYear(), m = start.getMonth(), guard = 0;
+    while ((y < t.getFullYear() || (y === t.getFullYear() && m <= t.getMonth())) && guard++ < 600) {
+      const v = vers.find(x => activeIn(x, y, m));
+      if (v) {
+        const floor = new Date(Math.max(start.getTime(), pd(v.effective_from || '2000-01-01').getTime()));
+        const ds = occDates(v, y, m);
+        const per = Number(v.amount) * share(v);
+        if (ds === null) acc += per * AVG[v.cadence];
+        else acc += ds.filter(d => d <= t && d >= floor).length * per;
+      }
+      m++; if (m > 11) { m = 0; y++; }
+    }
+  });
+  state.goalTx.filter(x => x.goal_id === g.id).forEach(x => { acc -= Number(x.amount) * txShare(x); });
   return acc;
 }
-const goalMonthly = g => state.items.filter(i => i.goal_id === g.id)
+const goalMonthly = g => itemsFor(state.y, state.m).filter(i => i.goal_id === g.id)
   .reduce((s,i) => s + Number(i.amount) * AVG[i.cadence] * share(i), 0);
 
 /* ===== auth ===== */
@@ -516,6 +595,8 @@ async function start() {
   $('app').classList.remove('hide');
   state.members = r.data;
   state.household = r.data[0].household_id;
+  const h = await sb.from('households').select('*').eq('id', state.household).limit(1);
+  state.home = (h.data && h.data[0]) || null;
   renderWhoBar();
   await refresh();
   loadInviteCode();
@@ -576,13 +657,18 @@ function render() {
     '<span>In <b class="num">'+money(t.inc)+'</b></span>'+
     '<span>Out <b class="num">'+money(t.out)+'</b></span>'+
     (t.goal ? '<span>Saved <b class="num">'+money(t.goal)+'</b></span>' : '');
+  const endBal = balanceEnd(y, m);
+  $('projWrap').innerHTML = endBal === null ? '' :
+    '<div class="proj">Account at the end of '+new Date(y,m,1).toLocaleDateString('en-US',{month:'long'})+
+    ': <b class="'+(endBal<0?'bad':'')+'">'+money(endBal)+'</b></div>';
   $('flagWrap').innerHTML = extraPaychecks(y,m) ? '<span class="flag">Three-paycheck month</span>' : '';
 
   const vis = i => share(i) > 0;
-  const income = state.items.filter(i => i.type === 'income' && vis(i));
-  const bills  = state.items.filter(i => i.type === 'expense' && !i.goal_id && i.kind !== 'envelope' && vis(i));
-  const envs   = state.items.filter(i => i.type === 'expense' && !i.goal_id && i.kind === 'envelope' && vis(i));
-  const contrib= state.items.filter(i => i.goal_id && vis(i));
+  const live = itemsFor(y, m);
+  const income = live.filter(i => i.type === 'income' && vis(i));
+  const bills  = live.filter(i => i.type === 'expense' && !i.goal_id && i.kind !== 'envelope' && vis(i));
+  const envs   = live.filter(i => i.type === 'expense' && !i.goal_id && i.kind === 'envelope' && vis(i));
+  const contrib= live.filter(i => i.goal_id && vis(i));
 
   $('inSum').textContent   = money(t.inc);
   $('billSum').textContent = money(t.bill);
@@ -596,17 +682,8 @@ function render() {
   envelopeRows('envRows', envs, y, m, isThisMonth);
   plainRows('goalContribRows', contrib, '', '');
 
-  const out = [];
-  for (let k = 0; k < 6; k++) {
-    const d = new Date(y,m+k,1), yy = d.getFullYear(), mm = d.getMonth();
-    out.push({ y:yy, m:mm, left:totals(yy,mm).left, fat:extraPaychecks(yy,mm) });
-  }
-  const peak = Math.max.apply(null, out.map(o => Math.abs(o.left)).concat([1]));
-  $('bars').innerHTML = out.map((o,k) =>
-    '<div class="bwrap"><div class="bval">'+money(o.left)+'</div><div class="b'+(o.left<0?' neg':'')+
-    (k===0?' sel':'')+'" style="height:'+Math.max(3,Math.abs(o.left)/peak*84)+'%"></div></div>').join('');
-  $('blabels').innerHTML = out.map(o => '<div class="'+(o.fat?'fat':'')+'">'+
-    new Date(o.y,o.m,1).toLocaleDateString('en-US',{month:'short'})+(o.fat?' &times;3':'')+'</div>').join('');
+  renderRanges();
+  renderBalance();
 
   const visTx = state.tx.filter(x => txShare(x) > 0);
   const spent = visTx.reduce((s,x) => s + Number(x.amount) * txShare(x), 0);
@@ -625,9 +702,10 @@ function render() {
 }
 
 function ownerTag(i) {
-  if (state.members.length < 2) return '';
-  if (!i.owner_id) return ' &middot; <span class="shared">shared</span>';
-  return ' &middot; ' + esc(i.owner_id === state.me ? 'you' : nameOf(i.owner_id));
+  const older = isCurrent(i) ? '' : ' &middot; <span class="shared">was</span>';
+  if (state.members.length < 2) return older;
+  if (!i.owner_id) return ' &middot; <span class="shared">shared</span>' + older;
+  return ' &middot; ' + esc(i.owner_id === state.me ? 'you' : nameOf(i.owner_id)) + older;
 }
 
 function plainRows(target, list, emptyTitle, emptyBody) {
@@ -789,6 +867,78 @@ function renderGoals() {
   }).join('');
 }
 
+/* ===== running balance chart ===== */
+function renderRanges() {
+  const opts = [[6,'6M'],[12,'1Y'],[36,'3Y']];
+  $('ranges').innerHTML = opts.map(o =>
+    '<button data-range="'+o[0]+'" class="'+(state.range===o[0]?'on':'')+'">'+o[1]+'</button>').join('');
+  $('ranges').querySelectorAll('[data-range]').forEach(b => b.onclick = () => {
+    state.range = Number(b.dataset.range); renderRanges(); renderBalance();
+  });
+}
+
+function renderBalance() {
+  const n = state.range, pts = balanceSeries(n);
+  const W = 320, H = 150, PADT = 14, PADB = 22;
+  const vals = pts.map(p => p.bal);
+  const hi = Math.max.apply(null, vals.concat([0]));
+  const lo = Math.min.apply(null, vals.concat([0]));
+  const span = (hi - lo) || 1;
+  const x = k => n === 1 ? W/2 : (k/(n-1))*W;
+  const yOf = v => PADT + (hi - v)/span * (H - PADT - PADB);
+  const zeroY = yOf(0);
+
+  let line = '', area = '';
+  pts.forEach((p,k) => {
+    const cx = x(k).toFixed(1), cy = yOf(p.bal).toFixed(1);
+    line += (k ? ' L' : 'M') + cx + ' ' + cy;
+  });
+  area = line + ' L' + x(n-1).toFixed(1) + ' ' + zeroY.toFixed(1) + ' L' + x(0).toFixed(1) + ' ' + zeroY.toFixed(1) + ' Z';
+
+  const dots = pts.map((p,k) => {
+    const show = n <= 12 || k % 6 === 0 || k === n-1;
+    if (!show) return '';
+    return '<circle cx="'+x(k).toFixed(1)+'" cy="'+yOf(p.bal).toFixed(1)+'" r="'+(p.fat?3.4:2.4)+'" '+
+      'fill="'+(p.bal<0?'#E0705A':(p.fat?'#FAE7AA':'#E8B44A'))+'"/>';
+  }).join('');
+
+  const every = n <= 6 ? 1 : n <= 12 ? 2 : 6;
+  const labels = pts.map((p,k) => {
+    if (k % every !== 0 && k !== n-1) return '';
+    const anchor = k === 0 ? 'start' : (k === n-1 ? 'end' : 'middle');
+    const txt = n > 12
+      ? new Date(p.y,p.m,1).toLocaleDateString('en-US',{month:'short',year:'2-digit'})
+      : new Date(p.y,p.m,1).toLocaleDateString('en-US',{month:'short'});
+    return '<text x="'+x(k).toFixed(1)+'" y="'+(H-6)+'" text-anchor="'+anchor+'" '+
+      'fill="'+(p.fat?'#E8B44A':'#9A8C79')+'" font-size="9.5" font-weight="'+(p.fat?'700':'400')+'" '+
+      'letter-spacing=".06em">'+txt+'</text>';
+  }).join('');
+
+  const dip = pts.filter(p => p.bal < 0)[0];
+
+  $('balChart').innerHTML =
+    '<svg class="balsvg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" aria-hidden="true">'+
+    '<defs><linearGradient id="ba" x1="0" y1="0" x2="0" y2="1">'+
+      '<stop offset="0" stop-color="#E8B44A" stop-opacity=".34"/>'+
+      '<stop offset="1" stop-color="#E8B44A" stop-opacity="0"/></linearGradient></defs>'+
+    (lo < 0 ? '<rect x="0" y="'+zeroY.toFixed(1)+'" width="'+W+'" height="'+(H-PADB-zeroY).toFixed(1)+'" fill="#E0705A" opacity=".07"/>' : '')+
+    '<line x1="0" y1="'+zeroY.toFixed(1)+'" x2="'+W+'" y2="'+zeroY.toFixed(1)+'" '+
+      'stroke="'+(lo<0?'#E0705A':'#332B21')+'" stroke-width="1" stroke-dasharray="3 3"/>'+
+    '<path d="'+area+'" fill="url(#ba)"/>'+
+    '<path d="'+line+'" fill="none" stroke="#E8B44A" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>'+
+    dots + labels +
+    '</svg>';
+
+  const last = pts[n-1];
+  const endLabel = new Date(last.y,last.m,1).toLocaleDateString('en-US',{month:'short',year:'numeric'});
+  $('chartFoot').innerHTML =
+    '<div>'+(dip
+      ? 'Runs out '+new Date(dip.y,dip.m,1).toLocaleDateString('en-US',{month:'long',year:'numeric'})+
+        '<b class="bad">'+money(dip.bal)+'</b>'
+      : 'Lowest point<b>'+money(Math.min.apply(null, vals))+'</b>')+'</div>'+
+    '<div>By '+endLabel+'<b class="'+(last.bal<0?'bad':'')+'">'+money(last.bal)+'</b></div>';
+}
+
 /* ===== nav ===== */
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   state.view = b.dataset.view;
@@ -842,7 +992,7 @@ function openSheet(html, wire) {
 function catList() {
   const freq = {};
   state.tx.forEach(t => freq[t.category] = (freq[t.category]||0)+1);
-  state.items.forEach(i => { if (!i.goal_id) freq[i.category] = (freq[i.category]||0)+1; });
+  state.items.forEach(i => { if (!i.goal_id && isCurrent(i)) freq[i.category] = (freq[i.category]||0)+1; });
   const used = Object.keys(freq).sort((a,b) => freq[b]-freq[a]);
   return used.concat(DEFAULT_CATS.filter(c => used.indexOf(c) === -1));
 }
@@ -908,6 +1058,13 @@ function itemSheet(item, presetGoalId) {
     (goal ? '' : '<label>Category</label><div class="chips" id="catChips"></div>')+
     (state.members.length > 1 ? '<label>Whose</label><div class="chips" id="ownChips"></div>'+
       '<p class="hint">Shared lines split evenly when you switch to a personal view.</p>' : '')+
+    (item && isCurrent(item) ?
+      '<div id="scopeWrap" class="hide"><label>Apply the new numbers</label>'+
+      '<div class="seg" id="scopeSeg">'+
+      '<button type="button" data-scope="forward" class="on">From '+
+        new Date(state.y,state.m,1).toLocaleDateString('en-US',{month:'short',year:'numeric'})+' on</button>'+
+      '<button type="button" data-scope="all">Everywhere</button></div>'+
+      '<p class="hint" id="scopeHint"></p></div>' : '')+
     '<p class="msg" id="f-err"></p>'+
     '<div class="sheet-actions"><button class="btn-cancel" id="f-cancel">Cancel</button>'+
     '<button class="btn-primary" id="f-save">Save</button></div>'+
@@ -956,6 +1113,34 @@ function itemSheet(item, presetGoalId) {
     const getOwn = state.members.length > 1
       ? chipGroup($('ownChips'), ownerOptions(), it.owner_id || '__null', null, false)
       : (() => null);
+
+    /* a raise is not a typo: material changes can fork history */
+    let scope = 'forward';
+    const material = () => item && (
+      Number($('f-amt').value) !== Number(item.amount) ||
+      getCad() !== item.cadence ||
+      ($('f-anch').value || null) !== (item.anchor_date || null) ||
+      (getCad() === 'semimonthly' && ($('f-anch2').value || null) !== (item.anchor_date2 || null)));
+    const syncScope = () => {
+      if (!$('scopeWrap')) return;
+      const show = material();
+      $('scopeWrap').classList.toggle('hide', !show);
+      if (show) $('scopeHint').textContent = scope === 'forward'
+        ? 'Earlier months keep the old numbers. Use this for a raise or a rate change.'
+        : 'Rewrites every month, past included. Use this to fix a mistake.';
+    };
+    if ($('scopeSeg')) {
+      $('scopeSeg').querySelectorAll('button').forEach(b => b.onclick = () => {
+        scope = b.dataset.scope;
+        $('scopeSeg').querySelectorAll('button').forEach(x => x.classList.toggle('on', x===b));
+        syncScope();
+      });
+    }
+    $('f-amt').addEventListener('input', syncScope);
+    $('f-anch').addEventListener('change', syncScope);
+    if ($('f-anch2')) $('f-anch2').addEventListener('change', syncScope);
+    syncScope();
+
     $('f-cancel').onclick = closeSheet;
     $('f-save').onclick = async () => {
       const cad = getCad(), own = getOwn();
@@ -973,13 +1158,48 @@ function itemSheet(item, presetGoalId) {
         goal_id: gid
       };
       $('f-err').textContent = 'Saving…';
-      const res = item ? await sb.from('line_items').update(row).eq('id', item.id)
-                       : await sb.from('line_items').insert(row);
+
+      /* fork: close the old version at the end of last month, start a new one */
+      if (item && isCurrent(item) && scope === 'forward' && material()) {
+        const from = new Date(state.y, state.m, 1);
+        const prevEnd = new Date(state.y, state.m, 0);
+        if (prevEnd < pd(item.effective_from || '2000-01-01')) {
+          const r = await sb.from('line_items').update(row).eq('id', item.id);
+          if (r.error) { $('f-err').textContent = r.error.message; return; }
+          closeSheet(); refresh(); return;
+        }
+        const close = await sb.from('line_items')
+          .update({ effective_to: iso(prevEnd) }).eq('id', item.id);
+        if (close.error) { $('f-err').textContent = close.error.message; return; }
+        row.series_id = item.series_id || item.id;
+        row.effective_from = iso(from);
+        row.effective_to = null;
+        const ins = await sb.from('line_items').insert(row);
+        if (ins.error) {
+          await sb.from('line_items').update({ effective_to: null }).eq('id', item.id);
+          $('f-err').textContent = ins.error.message; return;
+        }
+        closeSheet(); refresh(); return;
+      }
+
+      /* edit in place: renames, recategorising, or an explicit fix-everywhere */
+      let res;
+      if (item) {
+        if (scope === 'all' && item.series_id) {
+          res = await sb.from('line_items').update(row).eq('series_id', item.series_id);
+        } else {
+          res = await sb.from('line_items').update(row).eq('id', item.id);
+        }
+      } else {
+        res = await sb.from('line_items').insert(row);
+      }
       if (res.error) { $('f-err').textContent = res.error.message; return; }
       closeSheet(); refresh();
     };
     if (item) $('f-del').onclick = async () => {
-      await sb.from('line_items').update({ is_active:false }).eq('id', item.id);
+      const sid = item.series_id;
+      if (sid) await sb.from('line_items').update({ is_active:false }).eq('series_id', sid);
+      else await sb.from('line_items').update({ is_active:false }).eq('id', item.id);
       closeSheet(); refresh();
     };
     if (!item) setTimeout(() => $('f-amt').focus(), 80);
@@ -1084,6 +1304,55 @@ function goalSheet(goal) {
   });
 }
 
+/* ===== settings ===== */
+function settingsSheet() {
+  const h = state.home || {};
+  const me = state.members.find(m => m.user_id === state.me) || {};
+  const jars = state.goals.reduce((s,g) => s + goalSaved(g), 0);
+  openSheet(
+    '<h2>Settings</h2>'+
+    '<p class="sub">The balance is what the projection counts forward from.</p>'+
+    '<label for="s-bal">What is actually in the account</label>'+
+    '<div class="amtwrap"><span>$</span><input id="s-bal" class="big" type="number" inputmode="decimal" '+
+      'step="0.01" value="'+(h.opening_balance!=null?h.opening_balance:'')+'" placeholder="0" size="5"></div>'+
+    '<label for="s-date">As of</label>'+
+    '<input id="s-date" type="date" value="'+(h.opening_date||iso(new Date(now.getFullYear(),now.getMonth(),1)))+'">'+
+    '<p class="hint">Check your bank, put the number in, set the date. Everything projects forward from here.</p>'+
+    (jars ? '<p class="hint">Set aside in jars: <b style="color:var(--gold)">'+money(jars)+'</b>. '+
+      'The projection assumes that money has left the account.</p>' : '')+
+    '<label for="s-name">Your name in this household</label>'+
+    '<input id="s-name" class="txt" value="'+esc(me.display_name||'')+'" placeholder="Jared">'+
+    '<p class="msg" id="s-err"></p>'+
+    '<div class="sheet-actions"><button class="btn-cancel" id="s-cancel">Close</button>'+
+    '<button class="btn-primary" id="s-save">Save</button></div>',
+  function () {
+    $('s-cancel').onclick = closeSheet;
+    $('s-save').onclick = async () => {
+      $('s-err').textContent = 'Saving…';
+      const a = await sb.from('households').update({
+        opening_balance: Number($('s-bal').value) || 0,
+        opening_date: $('s-date').value || null,
+        checked_at: new Date().toISOString()
+      }).eq('id', state.household);
+      if (a.error) { $('s-err').textContent = a.error.message; return; }
+      const nm = $('s-name').value.trim();
+      if (nm && nm !== me.display_name) {
+        const b = await sb.from('household_members').update({ display_name: nm })
+          .eq('household_id', state.household).eq('user_id', state.me);
+        if (b.error) { $('s-err').textContent = b.error.message; return; }
+      }
+      closeSheet();
+      const h2 = await sb.from('households').select('*').eq('id', state.household).limit(1);
+      state.home = (h2.data && h2.data[0]) || null;
+      const m2 = await sb.from('household_members').select('*');
+      state.members = m2.data || state.members;
+      renderWhoBar(); refresh();
+    };
+    setTimeout(() => $('s-bal').focus(), 80);
+  });
+}
+
+$('settingsBtn').onclick = settingsSheet;
 $('addItem').onclick = () => itemSheet(null);
 $('addTx').onclick   = () => txSheet(null);
 $('addGoal').onclick = () => goalSheet(null);
