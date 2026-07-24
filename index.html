@@ -1191,6 +1191,14 @@ function itemSheet(item, presetGoalId) {
           res = await sb.from('line_items').update(row).eq('id', item.id);
         }
       } else {
+        /* a new line starts this month — or earlier, if it is dated in the past */
+        let from = new Date(state.y, state.m, 1);
+        if (row.anchor_date) {
+          const a = pd(row.anchor_date);
+          const aStart = new Date(a.getFullYear(), a.getMonth(), 1);
+          if (aStart < from) from = aStart;
+        }
+        row.effective_from = iso(from);
         res = await sb.from('line_items').insert(row);
       }
       if (res.error) { $('f-err').textContent = res.error.message; return; }
